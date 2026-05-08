@@ -1,4 +1,7 @@
 // Better Claude - Firefox extension
+// Improvements for Claude.ai:
+//   - Automatic RTL alignment for Hebrew/Arabic content in chats
+//   - Ctrl+Right Shift / Ctrl+Left Shift to set input direction (container-level)
 // https://github.com/AssafTzurEl/better-claude
 
 // === Configuration ===
@@ -15,8 +18,6 @@ function log(...args) {
 const RTL_REGEX = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g;
 const LTR_REGEX = /[A-Za-z\u00C0-\u024F]/g;
 
-// Walk a DOM element and collect text, but skip anything inside <code>, <ul>, or <ol>.
-// Excludes inline code from paragraph counts and excludes nested lists from outer list counts.
 function getRelevantText(element) {
   let text = '';
   for (const node of element.childNodes) {
@@ -37,7 +38,6 @@ function detectDirectionFromText(text) {
 
   if (rtlCount === 0 && ltrCount === 0) return 'ltr';
   if (rtlCount === 0) return 'ltr';
-  // RTL is the default; LTR wins only if it dominates by the configured ratio
   return ltrCount > rtlCount * LTR_RATIO_THRESHOLD ? 'ltr' : 'rtl';
 }
 
@@ -57,7 +57,6 @@ function clearDirection(el) {
 }
 
 function forceCodeChildrenLtr(element) {
-  // v1: inline code is always LTR. Future: detect per-code-element direction.
   element.querySelectorAll('code').forEach(code => {
     code.style.direction = 'ltr';
     code.style.textAlign = 'left';
@@ -111,6 +110,32 @@ function applyDirectionToChat() {
   log('Direction applied:', stats);
 }
 
+// === Input direction handling (container-level) ===
+const INPUT_SELECTOR = '[data-testid="chat-input"]';
+
+function handleInputKeydown(e) {
+  if (e.key !== 'Shift' || !e.ctrlKey) return;
+
+  const input = e.currentTarget;
+  if (e.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT) {
+    setDirection(input, 'rtl');
+    log('Input set to RTL');
+  } else if (e.location === KeyboardEvent.DOM_KEY_LOCATION_LEFT) {
+    setDirection(input, 'ltr');
+    log('Input set to LTR');
+  }
+}
+
+function attachInputHandler() {
+  const input = document.querySelector(INPUT_SELECTOR);
+  if (!input) return;
+  if (input.dataset.betterClaudeAttached === 'true') return;
+
+  input.addEventListener('keydown', handleInputKeydown);
+  input.dataset.betterClaudeAttached = 'true';
+  log('Input handler attached');
+}
+
 // === MutationObserver ===
 let debounceTimer = null;
 
@@ -119,6 +144,7 @@ function scheduleUpdate() {
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
     applyDirectionToChat();
+    attachInputHandler();
   }, DEBOUNCE_MS);
 }
 
@@ -137,5 +163,6 @@ observer.observe(document.body, {
 
 // Initial pass
 applyDirectionToChat();
+attachInputHandler();
 
 log('Better Claude: ready');
