@@ -21,17 +21,9 @@ A Firefox extension that improves the [Claude.ai](https://claude.ai) experience 
 
 This is an unofficial, third-party extension. It is not affiliated with or endorsed by Anthropic.
 
-## Installation (development / temporary)
+## Installation
 
-The extension is currently in early release. To install it:
-
-1. Clone or download this repository.
-2. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
-3. Click **"Load Temporary Add-on..."**.
-4. Select the `manifest.json` file from this repository.
-5. Open or refresh any [Claude.ai](https://claude.ai) tab. Hebrew and Arabic content should now be aligned correctly.
-
-Temporary add-ons are removed when Firefox is closed. Repeat the steps above after each restart, or wait for the extension to be published to the official Firefox Add-ons store.
+Install Better Claude from the [Firefox Add-ons page](https://addons.mozilla.org/en-US/firefox/addon/better-claude).
 
 ## Reporting bugs and requesting features
 
@@ -81,7 +73,7 @@ Better Claude הוא תוסף לפיירפוקס שמשפר את השימוש ב
 
 ### התקנה
 
-ראו את ההוראות באנגלית למעלה.
+התקינו את Better Claude מ[דף התוספים של Firefox](https://addons.mozilla.org/en-US/firefox/addon/better-claude).
 
 ## דיווח על באגים ובקשות לתכונות
 

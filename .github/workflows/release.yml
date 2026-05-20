@@ -1,0 +1,42 @@
+name: Package and Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      - name: Get version from manifest
+        id: version
+        run: echo "version=$(jq -r '.version' manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build extension
+        run: web-ext build --overwrite-dest
+
+      - name: Rename artifact to .xpi
+        run: |
+          ZIP=$(ls web-ext-artifacts/*.zip)
+          mv "$ZIP" "${ZIP%.zip}.xpi"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Better Claude v${{ steps.version.outputs.version }}
+          files: web-ext-artifacts/*.xpi
+          fail_on_unmatched_files: true
