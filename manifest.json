@@ -6,10 +6,23 @@
   "author": "Assaf Tzur-El",
   "homepage_url": "https://github.com/AssafTzurEl/better-claude",
 
+  "icons": {
+    "16": "icons/better-claude_logo_16x16.png",
+    "32": "icons/better-claude_logo_32x32.png",
+    "48": "icons/better-claude_logo_48x48.png",
+    "96": "icons/better-claude_logo_96x96.png",
+    "128": "icons/better-claude_logo_128x128.png"
+  },
+
+
   "browser_specific_settings": {
     "gecko": {
       "id": "better-claude@pashut.co.il",
-      "strict_min_version": "109.0"
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
     }
   },
 
