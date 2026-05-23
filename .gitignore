@@ -9,6 +9,7 @@ desktop.ini
 *.swp
 *.swo
 *~
+.claude/settings.local.json
 
 # Build artifacts
 *.zip
