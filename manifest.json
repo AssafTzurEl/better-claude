@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Better Claude",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Improvements for Claude.ai: Automatic RTL alignment for Hebrew and Arabic content in chats.",
   "author": "Assaf Tzur-El",
   "homepage_url": "https://github.com/AssafTzurEl/better-claude",
@@ -10,6 +10,7 @@
     "16": "icons/better-claude_logo_16x16.png",
     "32": "icons/better-claude_logo_32x32.png",
     "48": "icons/better-claude_logo_48x48.png",
+    "64": "icons/better-claude_logo_64x64.png",
     "96": "icons/better-claude_logo_96x96.png",
     "128": "icons/better-claude_logo_128x128.png"
   },
