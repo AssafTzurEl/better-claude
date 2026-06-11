@@ -68,7 +68,8 @@ function applyDirectionToChat() {
 
   // 1. Top-level lists only. Nested lists inherit via CSS direction inheritance.
   const allLists = document.querySelectorAll(
-    '.font-claude-response ul, .font-claude-response ol'
+    '.font-claude-response ul, .font-claude-response ol, ' +
+    '[data-testid="user-message"] ul, [data-testid="user-message"] ol'
   );
   const topLevelLists = [...allLists].filter(
     list => !list.parentElement.closest('ul, ol')
@@ -126,6 +127,17 @@ function injectInputStyles() {
     ${INPUT_SELECTOR}[style*="direction: rtl"] ol,
     ${INPUT_SELECTOR}[style*="direction: rtl"] ul {
       padding-inline-start: 1.5em;
+    }
+    /* User-message lists use a left padding (pl-7/pl-8) for LTR markers, but
+       no inline-start padding. When we flip them to RTL the markers render at
+       the right edge and get clipped by the bubble's overflow:hidden. Move the
+       padding to the inline-start side so the markers stay inside. */
+    [data-testid="user-message"] ul[style*="direction: rtl"],
+    [data-testid="user-message"] ol[style*="direction: rtl"],
+    [data-testid="user-message"] [style*="direction: rtl"] ul,
+    [data-testid="user-message"] [style*="direction: rtl"] ol {
+      padding-inline-start: 1.75em;
+      padding-left: 0;
     }
   `;
   (document.head || document.documentElement).appendChild(style);
