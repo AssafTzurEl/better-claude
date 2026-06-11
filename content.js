@@ -113,6 +113,25 @@ function applyDirectionToChat() {
 // === Input direction handling (container-level) ===
 const INPUT_SELECTOR = '[data-testid="chat-input"]';
 
+// When the input is switched to RTL, the editor's list markers (which use
+// `list-style-position: outside` with no inline-start padding) render past the
+// right edge, forcing an unnecessary horizontal scrollbar. Give RTL lists
+// enough inline-start padding to keep the markers inside the box. Scoped to
+// our own RTL style so Anthropic's default LTR rendering is untouched.
+function injectInputStyles() {
+  if (document.getElementById('better-claude-input-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'better-claude-input-styles';
+  style.textContent = `
+    ${INPUT_SELECTOR}[style*="direction: rtl"] ol,
+    ${INPUT_SELECTOR}[style*="direction: rtl"] ul {
+      padding-inline-start: 1.5em;
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+  log('Input styles injected');
+}
+
 function handleInputKeydown(e) {
   if (e.key !== 'Shift' || !e.ctrlKey) return;
 
@@ -162,6 +181,7 @@ observer.observe(document.body, {
 });
 
 // Initial pass
+injectInputStyles();
 applyDirectionToChat();
 attachInputHandler();
 
