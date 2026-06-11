@@ -68,7 +68,8 @@ function applyDirectionToChat() {
 
   // 1. Top-level lists only. Nested lists inherit via CSS direction inheritance.
   const allLists = document.querySelectorAll(
-    '.font-claude-response ul, .font-claude-response ol'
+    '.font-claude-response ul, .font-claude-response ol, ' +
+    '[data-testid="user-message"] ul, [data-testid="user-message"] ol'
   );
   const topLevelLists = [...allLists].filter(
     list => !list.parentElement.closest('ul, ol')
@@ -112,6 +113,36 @@ function applyDirectionToChat() {
 
 // === Input direction handling (container-level) ===
 const INPUT_SELECTOR = '[data-testid="chat-input"]';
+
+// When the input is switched to RTL, the editor's list markers (which use
+// `list-style-position: outside` with no inline-start padding) render past the
+// right edge, forcing an unnecessary horizontal scrollbar. Give RTL lists
+// enough inline-start padding to keep the markers inside the box. Scoped to
+// our own RTL style so Anthropic's default LTR rendering is untouched.
+function injectInputStyles() {
+  if (document.getElementById('better-claude-input-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'better-claude-input-styles';
+  style.textContent = `
+    ${INPUT_SELECTOR}[style*="direction: rtl"] ol,
+    ${INPUT_SELECTOR}[style*="direction: rtl"] ul {
+      padding-inline-start: 1.5em;
+    }
+    /* User-message lists use a left padding (pl-7/pl-8) for LTR markers, but
+       no inline-start padding. When we flip them to RTL the markers render at
+       the right edge and get clipped by the bubble's overflow:hidden. Move the
+       padding to the inline-start side so the markers stay inside. */
+    [data-testid="user-message"] ul[style*="direction: rtl"],
+    [data-testid="user-message"] ol[style*="direction: rtl"],
+    [data-testid="user-message"] [style*="direction: rtl"] ul,
+    [data-testid="user-message"] [style*="direction: rtl"] ol {
+      padding-inline-start: 1.75em;
+      padding-left: 0;
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+  log('Input styles injected');
+}
 
 function handleInputKeydown(e) {
   if (e.key !== 'Shift' || !e.ctrlKey) return;
@@ -162,6 +193,7 @@ observer.observe(document.body, {
 });
 
 // Initial pass
+injectInputStyles();
 applyDirectionToChat();
 attachInputHandler();
 
