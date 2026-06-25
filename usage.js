@@ -123,9 +123,10 @@ async function fetchUsage() {
 // === Color mapping (DESIGN §4) ===
 
 function severityToColor(severity) {
-  if (severity === 'normal')  return '#3b82f6'; // blue
-  if (severity === 'warning') return '#f59e0b'; // amber
-  return '#ef4444';                              // red (critical or unknown)
+  if (severity === 'normal')   return '#3b82f6'; // blue
+  if (severity === 'warning')  return '#fab219'; // yellow
+  if (severity === 'critical') return '#d03b3b'; // red
+  return '#d03b3b';                              // red (unknown — treat as critical)
 }
 
 // === Reset-time formatting (DESIGN §5.2) ===
