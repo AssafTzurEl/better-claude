@@ -1,10 +1,16 @@
 // Better Claude - Usage bars module
 // Fetches and parses Claude plan usage (session + weekly) from the API,
-// and renders them as thin bars in a temporary fixed-position strip (Steps 0–2).
+// and renders them as thin bars in the chat header (wide) or below the
+// chat title (narrow). Falls back to a fixed strip if the header is not found.
 
 // === Configuration ===
 const USAGE_ENABLED = true;
 const USAGE_DEBUG = true;
+
+// Minimum pixel width for the widget to be useful in the header.
+// Two progress bars need label + percent + track — less than this is too cramped.
+// This is a content constraint, not a viewport breakpoint.
+const WIDGET_MIN_USEFUL_PX = 280;
 
 // === Logging ===
 function usageLog(...args) {
@@ -155,7 +161,45 @@ function injectUsageStyles() {
   const style = document.createElement('style');
   style.id = 'bc-usage-styles';
   style.textContent = `
-    #bc-usage-widget {
+    /* Header placement (wide window) — absolutely centered in the <header>
+       element (position:sticky = the CSS containing block). Absolute positioning
+       removes the widget from the flex flow so neither the title's flex:1 nor
+       the actions-div width affects its horizontal center. */
+    #bc-usage-widget[data-bc-placement="header"] {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 0;
+      bottom: 0;
+      width: 460px; /* overridden by checkPlacement on first resize tick */
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 12px;
+      min-width: 0;
+      box-sizing: border-box;
+      font-size: 12px;
+      font-family: inherit;
+      line-height: 1;
+    }
+
+    /* Below-title placement (narrow window) — block row under the chat title */
+    #bc-usage-widget[data-bc-placement="below-title"] {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 4px 12px;
+      width: 100%;
+      max-width: 720px;
+      font-size: 12px;
+      font-family: inherit;
+      line-height: 1;
+      box-sizing: border-box;
+      border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+    }
+
+    /* Fixed strip fallback — absolutely positioned over the content area */
+    #bc-usage-widget[data-bc-placement="fixed"] {
       position: absolute;
       top: 0;
       left: 50%;
@@ -174,6 +218,8 @@ function injectUsageStyles() {
       font-family: inherit;
       line-height: 1;
     }
+
+    /* Shared lane styles */
     .bc-usage-lane {
       display: flex;
       align-items: center;
@@ -242,7 +288,7 @@ function buildUsageLane(label, data, formatReset) {
   return lane;
 }
 
-// Read the actual rendered background of the page (body or html), skipping transparent layers.
+// Read the actual rendered background of the page body (for fixed fallback only).
 function getPageBackground() {
   for (const el of [document.body, document.documentElement]) {
     const bg = getComputedStyle(el).backgroundColor;
@@ -251,8 +297,48 @@ function getPageBackground() {
   return null;
 }
 
+// === Header anchor detection ===
+
+// Tried in order; first match wins.
+const HEADER_SELECTORS = [
+  '[data-testid="conversation-header"]',
+  '[data-testid="chat-header"]',
+  '[data-testid="page-header"]',
+  '#main-content header',
+  'main header',
+];
+
+// Title element for below-title placement (narrow window).
+const TITLE_SELECTORS = [
+  '[data-testid="chat-title"]',
+  '[data-testid="conversation-title"]',
+  '#main-content header h1',
+  '#main-content header h2',
+  '#main-content h1',
+];
+
+function firstMatch(selectors) {
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    } catch { /* invalid selector — skip */ }
+  }
+  return null;
+}
+
+// === Mount ===
+
+let lastUsageData = null;
+
+// Set to true by the placement observer when the header is too cramped,
+// preventing tryMountInHeader from succeeding until space is available again.
+let headerTooNarrow = false;
+
 function mountUsageWidget(usageData) {
+  lastUsageData = usageData;
   document.getElementById('bc-usage-widget')?.remove();
+
   if (!usageData) return;
 
   injectUsageStyles();
@@ -262,23 +348,163 @@ function mountUsageWidget(usageData) {
   widget.appendChild(buildUsageLane('Session', usageData.session, formatSessionReset));
   widget.appendChild(buildUsageLane('Weekly',  usageData.weekly,  formatWeeklyReset));
 
+  if (!headerTooNarrow && tryMountInHeader(widget)) {
+    // Wide: in the header band.
+  } else if (tryMountBelowTitle(widget)) {
+    // Narrow: below the chat title.
+  } else {
+    // Fallback: fixed strip (injection guard — no recognized header/title found).
+    tryMountFixed(widget);
+  }
+
+  usageLog('widget mounted, placement:', widget.dataset.bcPlacement);
+}
+
+function tryMountInHeader(widget) {
+  const header = firstMatch(HEADER_SELECTORS);
+  if (!header) {
+    usageLog('header anchor not found — falling back to fixed strip');
+    return false;
+  }
+
+  // Claude wraps the header's flex row in an inner div. Walk up from the title
+  // element to find that direct child of the header (the actual flex container).
+  let container = header;
+  const titleEl = header.querySelector('[data-testid="chat-title-split"], [data-testid="chat-title"]');
+  if (titleEl) {
+    let el = titleEl;
+    while (el.parentElement && el.parentElement !== header) {
+      el = el.parentElement;
+    }
+    if (el.parentElement === header) container = el;
+  }
+
+  widget.dataset.bcPlacement = 'header';
+
+  // Widget is position:absolute relative to the <header> (position:sticky =
+  // containing block), so its exact DOM position inside the container doesn't
+  // affect layout. Append to keep it logically grouped with the header content.
+  container.appendChild(widget);
+
+  // Set initial width immediately so the first paint is correct.
+  widget.style.width = `${Math.min(720, getHeaderFreeSpace(header))}px`;
+
+  return true;
+}
+
+function tryMountBelowTitle(widget) {
+  // For narrow layout, insert after the title element; fall back to after the header.
+  const anchor = firstMatch(TITLE_SELECTORS) ?? firstMatch(HEADER_SELECTORS);
+  if (!anchor) return false;
+
+  widget.dataset.bcPlacement = 'below-title';
+
+  // Claude's header uses -mb-3 (-12px) which pulls the next sibling up under
+  // the sticky header. Push the widget back down so it's fully visible.
+  const anchorMarginBottom = parseFloat(getComputedStyle(anchor).marginBottom);
+  if (anchorMarginBottom < 0) {
+    widget.style.marginTop = `${-anchorMarginBottom}px`;
+  }
+
+  anchor.insertAdjacentElement('afterend', widget);
+  return true;
+}
+
+function tryMountFixed(widget) {
+  widget.dataset.bcPlacement = 'fixed';
   const bg = getPageBackground();
   if (bg) widget.style.background = bg;
 
-  // Insert into #main-content (position: relative) so the widget's
-  // CSS left:50%/translateX(-50%) centers over the content column, not the
-  // full viewport — and stays correct at any zoom level without JS measurement.
   const mainEl = document.getElementById('main-content');
   if (mainEl) {
     mainEl.appendChild(widget);
   } else {
-    // Fallback: switch to fixed positioning and append to body.
     widget.style.position = 'fixed';
     document.body.appendChild(widget);
   }
-
-  usageLog('widget mounted');
 }
+
+// === Placement observer ===
+// Uses the header's actual flex geometry to decide whether the bars belong
+// in the header or below the title. Reacts to window resize, sidebar toggle,
+// and any other layout change — not a fixed viewport breakpoint.
+
+function getHeaderFreeSpace(header) {
+  // The widget is absolutely centered in the header. The maximum width it can
+  // occupy without overlapping the title content (left) or the Share button
+  // (right) is 2× the smaller of (center-to-titleRight) and (center-to-shareLeft).
+  const headerRect = header.getBoundingClientRect();
+  const center = headerRect.left + headerRect.width / 2;
+
+  // Right edge of the visible title content (the split button, not the flex-1 wrapper).
+  const titleEl = header.querySelector('[data-testid="chat-title-split"]');
+  const titleRight = titleEl
+    ? titleEl.getBoundingClientRect().right
+    : center - headerRect.width * 0.3; // fallback: assume title occupies 20%
+
+  // Left edge of the Share button (absolutely positioned outside the flex row).
+  const shareBtn = document.querySelector('[data-testid="wiggle-controls-actions-share"]');
+  const shareLeft = shareBtn
+    ? shareBtn.getBoundingClientRect().left
+    : headerRect.right - 80; // fallback: reserve 80px for share cluster
+
+  const maxHalfWidth = Math.min(center - titleRight, shareLeft - center);
+  return Math.max(0, maxHalfWidth * 2);
+}
+
+function checkPlacement() {
+  if (!lastUsageData) return;
+  const widget = document.getElementById('bc-usage-widget');
+  if (!widget) return; // SPA observer handles remount
+
+  const header = firstMatch(HEADER_SELECTORS);
+  if (!header) return; // no header = no placement switching possible
+
+  const freeSpace = getHeaderFreeSpace(header);
+  const placement = widget.dataset.bcPlacement;
+
+  // Keep the header widget's width in sync with the safe available gap.
+  if (placement === 'header') {
+    widget.style.width = `${Math.min(720, freeSpace)}px`;
+  }
+
+  if (placement === 'header' && freeSpace < WIDGET_MIN_USEFUL_PX) {
+    usageLog(`header too narrow (${Math.round(freeSpace)}px), moving below title`);
+    headerTooNarrow = true;
+    mountUsageWidget(lastUsageData);
+  } else if (placement !== 'header' && freeSpace >= WIDGET_MIN_USEFUL_PX) {
+    usageLog(`header wide enough (${Math.round(freeSpace)}px), moving to header`);
+    headerTooNarrow = false;
+    mountUsageWidget(lastUsageData);
+  }
+}
+
+// Observe the document root: fires on window resize, zoom, and sidebar toggle
+// (all of which change the header's available width). The callback is cheap —
+// just two getBoundingClientRect calls and a comparison.
+let placementCheckTimer = null;
+new ResizeObserver(() => {
+  clearTimeout(placementCheckTimer);
+  placementCheckTimer = setTimeout(checkPlacement, 150);
+}).observe(document.documentElement);
+
+// === SPA navigation guard ===
+// Claude re-renders the header on chat switches, which removes our injected
+// widget. Watch for the widget disappearing from the DOM and re-mount it.
+
+let spaRemountTimer = null;
+
+new MutationObserver(() => {
+  if (document.getElementById('bc-usage-widget')) return; // still present
+  if (!lastUsageData) return;
+
+  clearTimeout(spaRemountTimer);
+  spaRemountTimer = setTimeout(() => {
+    spaRemountTimer = null;
+    usageLog('widget removed by SPA navigation, re-mounting');
+    mountUsageWidget(lastUsageData);
+  }, 300);
+}).observe(document.body, { childList: true, subtree: true });
 
 // === Init ===
 
