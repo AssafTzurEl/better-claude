@@ -12,6 +12,11 @@ const USAGE_DEBUG = true;
 // This is a content constraint, not a viewport breakpoint.
 const WIDGET_MIN_USEFUL_PX = 280;
 
+// Minimum milliseconds between API calls (debounce / min-interval).
+const MIN_REFRESH_INTERVAL_MS = 5000;
+// Poll cadence while Claude is generating a response.
+const POLL_INTERVAL_MS = 10000;
+
 // === Logging ===
 function usageLog(...args) {
   if (USAGE_DEBUG) console.log('[Better Claude / usage]', ...args);
@@ -155,6 +160,167 @@ function formatWeeklyReset(date) {
   return `Resets ${month} ${date.getDate()}`;
 }
 
+// === Refresh control (DESIGN §6) ===
+
+let lastRefreshAt = 0;
+let lastUpdatedAt = null; // Date.now() timestamp of the last successful fetch
+let refreshTimer = null;
+let pollTimer = null;
+let isGenerating = false;
+
+function formatLastUpdated(ts) {
+  if (!ts) return '';
+  const diffMs = Date.now() - ts;
+  if (diffMs < 60000) return 'just now';
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins} min ago`;
+  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function updateLastUpdatedLabel() {
+  const el = document.getElementById('bc-usage-updated');
+  if (el) el.textContent = formatLastUpdated(lastUpdatedAt);
+}
+
+// Freshen the "X min ago" text every 15 s without an API call.
+// 15 s means the first tick past the 60 s "just now" threshold lands at ~75 s.
+setInterval(updateLastUpdatedLabel, 15000);
+
+// Fetch and re-render. Callers are responsible for gating — use scheduleRefresh
+// unless bypassing the interval intentionally.
+async function doRefresh() {
+  usageLog('refreshing');
+  lastRefreshAt = Date.now();
+  const data = await fetchUsage();
+  lastUpdatedAt = Date.now();
+  mountUsageWidget(data);
+}
+
+// Collapse multiple triggers into one request; extend the delay to honour the
+// min interval if a recent fetch just happened.
+function scheduleRefresh(delayMs = 0) {
+  const remaining = MIN_REFRESH_INTERVAL_MS - (Date.now() - lastRefreshAt);
+  const effectiveDelay = Math.max(delayMs, remaining > 0 ? remaining : 0);
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(doRefresh, effectiveDelay);
+}
+
+// Bypass the min interval (manual ↻ or initial load).
+async function forceRefresh() {
+  clearTimeout(refreshTimer);
+  lastRefreshAt = 0;
+  await doRefresh();
+}
+
+function startPoll() {
+  if (pollTimer) return;
+  usageLog('10s poll started');
+  pollTimer = setInterval(() => scheduleRefresh(0), POLL_INTERVAL_MS);
+}
+
+function stopPoll() {
+  if (!pollTimer) return;
+  usageLog('10s poll stopped');
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+// === Generation detector ===
+// Watches for the stop-generation button that Claude renders while streaming.
+// Presence → generation started; disappearance → generation ended.
+
+const STOP_BTN_SELECTORS = [
+  '[data-testid="stop-response"]',
+  'button[aria-label="Stop"]',
+  'button[aria-label="Stop generating"]',
+  'button[aria-label*="stop" i]',
+];
+
+function stopButtonPresent() {
+  return STOP_BTN_SELECTORS.some(sel => {
+    try { return !!document.querySelector(sel); } catch { return false; }
+  });
+}
+
+new MutationObserver(() => {
+  const nowGenerating = stopButtonPresent();
+  if (nowGenerating === isGenerating) return;
+  isGenerating = nowGenerating;
+  if (isGenerating) {
+    usageLog('generation started — 10s poll active');
+    startPoll();
+  } else {
+    usageLog('generation ended — stopping poll');
+    stopPoll();
+    // Brief pause so the API can finalize the usage count before we fetch.
+    scheduleRefresh(1500);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+// === Event detectors (message send + manual ↻) ===
+
+const COMPOSER_SELECTORS = [
+  '[data-testid="chat-input"]',
+  '.ProseMirror',
+  '[contenteditable="true"]',
+];
+
+const SEND_BTN_SELECTORS_DETECT = [
+  '[data-testid="send-button"]',
+  'button[aria-label="Send message"]',
+  'button[aria-label="Send"]',
+];
+
+function handleKeydown(e) {
+  if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+  const target = e.target;
+  if (!target) return;
+  const inComposer = COMPOSER_SELECTORS.some(sel => {
+    try { return target.matches(sel) || !!target.closest(sel); } catch { return false; }
+  });
+  if (inComposer) {
+    usageLog('send detected (Enter key)');
+    scheduleRefresh(2000);
+  }
+}
+
+function handleClick(e) {
+  const target = e.target;
+  if (!target) return;
+
+  // Manual ↻ button — bypass min interval.
+  if (target.closest?.('#bc-usage-refresh-btn')) {
+    usageLog('manual refresh');
+    const btn = document.getElementById('bc-usage-refresh-btn');
+    if (btn && !btn.classList.contains('bc-spinning')) {
+      btn.classList.add('bc-spinning');
+      btn.addEventListener('animationend', () => btn.classList.remove('bc-spinning'), { once: true });
+    }
+    forceRefresh();
+    return;
+  }
+
+  // Send button.
+  const isSend = SEND_BTN_SELECTORS_DETECT.some(sel => {
+    try { return target.matches(sel) || !!target.closest(sel); } catch { return false; }
+  });
+  if (isSend) {
+    usageLog('send detected (send button)');
+    scheduleRefresh(2000);
+  }
+}
+
+function setupEventDetectors() {
+  document.addEventListener('keydown', handleKeydown, true);
+  document.addEventListener('click', handleClick, true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      usageLog('tab visible — scheduling refresh');
+      scheduleRefresh(0);
+    }
+  });
+}
+
 // === Styles ===
 
 function injectUsageStyles() {
@@ -254,6 +420,41 @@ function injectUsageStyles() {
       border-radius: 2px;
       transition: width 0.3s ease;
     }
+
+    /* "Last updated" label — only shown in header (wide) placement */
+    .bc-usage-updated {
+      white-space: nowrap;
+      color: GrayText;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    #bc-usage-widget[data-bc-placement="below-title"] .bc-usage-updated,
+    #bc-usage-widget[data-bc-placement="fixed"] .bc-usage-updated {
+      display: none;
+    }
+
+    /* Manual refresh button */
+    .bc-usage-refresh-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      color: GrayText;
+      padding: 0 2px;
+      flex-shrink: 0;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+    .bc-usage-refresh-btn:hover {
+      color: CanvasText;
+    }
+    @keyframes bc-spin {
+      to { transform: rotate(360deg); }
+    }
+    .bc-usage-refresh-btn.bc-spinning svg {
+      animation: bc-spin 0.6s linear;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -348,6 +549,31 @@ function mountUsageWidget(usageData) {
   widget.id = 'bc-usage-widget';
   widget.appendChild(buildUsageLane('Session', usageData.session, formatSessionReset));
   widget.appendChild(buildUsageLane('Weekly',  usageData.weekly,  formatWeeklyReset));
+
+  // Last-updated label — hidden in narrow placements via CSS.
+  const updatedEl = document.createElement('span');
+  updatedEl.id = 'bc-usage-updated';
+  updatedEl.className = 'bc-usage-updated';
+  updatedEl.textContent = formatLastUpdated(lastUpdatedAt);
+  widget.appendChild(updatedEl);
+
+  // Manual refresh button.
+  const refreshBtn = document.createElement('button');
+  refreshBtn.id = 'bc-usage-refresh-btn';
+  refreshBtn.className = 'bc-usage-refresh-btn';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const refreshSvg = document.createElementNS(svgNS, 'svg');
+  refreshSvg.setAttribute('width', '16');
+  refreshSvg.setAttribute('height', '16');
+  refreshSvg.setAttribute('viewBox', '0 0 20 20');
+  refreshSvg.setAttribute('fill', 'currentColor');
+  refreshSvg.setAttribute('aria-hidden', 'true');
+  const refreshPath = document.createElementNS(svgNS, 'path');
+  refreshPath.setAttribute('d', 'M10.386 2.51A7.5 7.5 0 1 1 5.499 4H3a.5.5 0 0 1 0-1h3.5a.5.5 0 0 1 .49.402L7 3.5V7a.5.5 0 0 1-1 0V4.879a6.5 6.5 0 1 0 4.335-1.37L10 3.5l-.1-.01a.5.5 0 0 1 .1-.99z');
+  refreshSvg.appendChild(refreshPath);
+  refreshBtn.appendChild(refreshSvg);
+  refreshBtn.title = 'Refresh usage';
+  widget.appendChild(refreshBtn);
 
   if (!headerTooNarrow && tryMountInHeader(widget)) {
     // Wide: in the header band.
@@ -512,8 +738,8 @@ new MutationObserver(() => {
 async function initUsage() {
   if (!USAGE_ENABLED) return;
   usageLog('init');
-  const data = await fetchUsage();
-  mountUsageWidget(data);
+  setupEventDetectors();
+  await forceRefresh();
 }
 
 initUsage();
@@ -529,9 +755,9 @@ if (USAGE_DEBUG) {
   }, window, { defineAs: 'fetchUsage' });
 
   exportFunction(function() {
-    fetchUsage().then(
-      data => { mountUsageWidget(data); console.log('[Better Claude / usage] remounted'); },
-      e    => console.error('[Better Claude / usage] remount failed:', e)
+    forceRefresh().then(
+      () => console.log('[Better Claude / usage] refreshed and remounted'),
+      e  => console.error('[Better Claude / usage] refresh failed:', e)
     );
   }, window, { defineAs: 'remountUsageWidget' });
 }

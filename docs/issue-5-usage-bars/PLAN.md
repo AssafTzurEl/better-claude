@@ -104,6 +104,7 @@ without errors.
     button click).
   - **Response complete** — detect end of generation.
   - **10s poll while generating** — start on generation begin, stop on end.
+  - **Tab becomes visible** — `visibilitychange` event; catches up after switching away.
   - **Manual `↻`**.
 - Add a **debounce / min-interval** so stacked triggers don't hammer the API;
   stop the poll promptly when generation ends.

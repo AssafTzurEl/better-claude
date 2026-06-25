@@ -190,6 +190,7 @@ hover.
 | Message send (Enter) | Usage changes when a prompt is submitted |
 | Response complete | Capture the post-response number |
 | Every 10s while generating | Keep the bar live during long generations |
+| Tab becomes visible | Mirrors the usage page; catches up after the user was away |
 | Manual `↻` | User-forced refresh |
 
 Add a short **debounce / min-interval** so overlapping triggers (e.g. send +
