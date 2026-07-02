@@ -192,7 +192,7 @@ async function doRefresh() {
   usageLog('refreshing');
   lastRefreshAt = Date.now();
   const data = await fetchUsage();
-  lastUpdatedAt = Date.now();
+  if (data) lastUpdatedAt = Date.now();
   mountUsageWidget(data);
 }
 
@@ -386,6 +386,18 @@ function injectUsageStyles() {
       line-height: 1;
     }
 
+    /* Color tokens — matched to Claude's own usage display palette */
+    #bc-usage-widget {
+      --bc-text:      #0b0b0b;
+      --bc-secondary: #52514e;
+    }
+    @media (prefers-color-scheme: dark) {
+      #bc-usage-widget {
+        --bc-text:      #ffffff;
+        --bc-secondary: #c3c2b7;
+      }
+    }
+
     /* Shared lane styles */
     .bc-usage-lane {
       display: flex;
@@ -398,12 +410,12 @@ function injectUsageStyles() {
     }
     .bc-usage-label {
       white-space: nowrap;
-      color: CanvasText;
+      color: var(--bc-text);
       flex-shrink: 0;
     }
     .bc-usage-pct {
       white-space: nowrap;
-      color: GrayText;
+      color: var(--bc-secondary);
       flex-shrink: 0;
       min-width: 28px;
     }
@@ -424,7 +436,7 @@ function injectUsageStyles() {
     /* "Last updated" label — only shown in header (wide) placement */
     .bc-usage-updated {
       white-space: nowrap;
-      color: GrayText;
+      color: var(--bc-secondary);
       font-size: 11px;
       flex-shrink: 0;
     }
@@ -439,7 +451,7 @@ function injectUsageStyles() {
       border: none;
       cursor: pointer;
       font-size: 14px;
-      color: GrayText;
+      color: var(--bc-secondary);
       padding: 0 2px;
       flex-shrink: 0;
       line-height: 1;
@@ -447,7 +459,7 @@ function injectUsageStyles() {
       align-items: center;
     }
     .bc-usage-refresh-btn:hover {
-      color: CanvasText;
+      color: var(--bc-text);
     }
     @keyframes bc-spin {
       to { transform: rotate(360deg); }
