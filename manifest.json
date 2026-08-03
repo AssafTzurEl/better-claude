@@ -18,6 +18,11 @@
 
   "permissions": ["storage"],
 
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+
   "browser_specific_settings": {
     "gecko": {
       "id": "better-claude@pashut.co.il",

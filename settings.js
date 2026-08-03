@@ -1,7 +1,8 @@
 // Better Claude - Shared settings module
 // Owns the defaults table, the storage read, and validation. Loaded first in
 // the content_scripts list, so rtl.js and usage.js can read `bcSettings` and
-// gate their init on `bcSettingsReady`.
+// gate their init on `bcSettingsReady` - and loaded again by options.html, so
+// the settings page validates against the same table rather than its own copy.
 // Content scripts share one global scope - every global here is bc*/BC_*.
 // https://github.com/AssafTzurEl/better-claude
 
@@ -92,38 +93,3 @@ const bcSettingsReady = (async () => {
   }
   return bcSettings;
 })();
-
-// === Dev exports (Firefox only) ===
-// Content-script globals live in an isolated sandbox: the page console cannot
-// see them, and until Step 1 adds the options page there is no privileged
-// extension context to run browser.storage.sync.set() from either. Flip this to
-// true during development to drive settings from the page console (F12).
-// It must stay false in shipped code - same rule as usage.js: a debug flag
-// should never add API surface to claude.ai. Delete once the options page can
-// do this job.
-const BC_SETTINGS_DEV_EXPORTS = false;
-
-if (BC_SETTINGS_DEV_EXPORTS && typeof exportFunction === 'function') {
-  // Arguments cross the sandbox boundary, so these take/return JSON strings
-  // rather than objects - a primitive crosses cleanly, a plain object does not.
-  exportFunction(function() {
-    console.log('[Better Claude / settings] current:', JSON.stringify(bcSettings));
-  }, window, { defineAs: 'bcDumpSettings' });
-
-  exportFunction(function(json) {
-    browser.storage.sync.set(JSON.parse(json)).then(
-      () => console.log('[Better Claude / settings] wrote', json, '- reload to re-read'),
-      e  => console.error('[Better Claude / settings] write failed:', e)
-    );
-  }, window, { defineAs: 'bcSetSettings' });
-
-  exportFunction(function() {
-    browser.storage.sync.clear().then(
-      () => console.log('[Better Claude / settings] cleared - reload to re-read'),
-      e  => console.error('[Better Claude / settings] clear failed:', e)
-    );
-  }, window, { defineAs: 'bcClearSettings' });
-
-  console.log('[Better Claude / settings] dev exports active:',
-    'bcDumpSettings(), bcSetSettings(json), bcClearSettings()');
-}

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Better Claude — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <!-- All user-facing text is set from BC_STRINGS in options.js, so the markup
+       stays language-free and browser.i18n can be layered on later. -->
+  <main class="bc-page">
+    <p class="bc-subtitle" id="bc-subtitle"></p>
+
+    <section class="bc-group">
+      <h2 id="bc-heading-direction"></h2>
+
+      <div class="bc-field">
+        <label class="bc-label" for="bc-threshold" id="bc-threshold-label"></label>
+        <p class="bc-hint" id="bc-threshold-hint"></p>
+        <div class="bc-slider-row">
+          <span class="bc-slider-end" id="bc-threshold-end-min"></span>
+          <input type="range" id="bc-threshold" min="-10" max="10" step="1" value="2">
+          <span class="bc-slider-end" id="bc-threshold-end-max"></span>
+        </div>
+        <p class="bc-readout" id="bc-threshold-readout"></p>
+      </div>
+
+      <div class="bc-field">
+        <span class="bc-label" id="bc-direction-label"></span>
+        <p class="bc-hint" id="bc-direction-hint"></p>
+        <div class="bc-radio-row">
+          <label class="bc-choice">
+            <input type="radio" name="bc-input-direction" id="bc-direction-ltr" value="ltr">
+            <span id="bc-direction-ltr-label"></span>
+          </label>
+          <label class="bc-choice">
+            <input type="radio" name="bc-input-direction" id="bc-direction-rtl" value="rtl">
+            <span id="bc-direction-rtl-label"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="bc-group">
+      <h2 id="bc-heading-usage"></h2>
+
+      <div class="bc-field">
+        <label class="bc-choice">
+          <input type="checkbox" id="bc-usage-bars">
+          <span id="bc-usage-bars-label"></span>
+        </label>
+        <p class="bc-hint" id="bc-usage-bars-hint"></p>
+      </div>
+    </section>
+
+    <section class="bc-group">
+      <h2 id="bc-heading-advanced"></h2>
+
+      <div class="bc-field">
+        <label class="bc-choice">
+          <input type="checkbox" id="bc-debug-logging">
+          <span id="bc-debug-logging-label"></span>
+        </label>
+        <p class="bc-hint" id="bc-debug-logging-hint"></p>
+      </div>
+    </section>
+
+    <footer class="bc-footer">
+      <button type="button" id="bc-restore"></button>
+      <span class="bc-status" id="bc-status" role="status" aria-live="polite"></span>
+    </footer>
+  </main>
+
+  <script src="settings.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
