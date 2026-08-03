@@ -1,7 +1,6 @@
-// Better Claude - Firefox extension
-// Improvements for Claude.ai:
-//   - Automatic RTL alignment for Hebrew/Arabic content in chats
-//   - Ctrl+Right Shift / Ctrl+Left Shift to set input direction (container-level)
+// Better Claude - RTL module
+// Automatic RTL alignment for Hebrew/Arabic content in chats, plus
+// Ctrl+Right Shift / Ctrl+Left Shift to set input direction (container-level).
 // https://github.com/AssafTzurEl/better-claude
 
 // === Configuration ===
