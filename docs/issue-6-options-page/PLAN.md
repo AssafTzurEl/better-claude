@@ -33,15 +33,78 @@ redeclaration collisions in the shared scope.
 the top of `options.js` so `browser.i18n` can be layered on later without
 restructuring the page.
 
-**Threshold control: labeled slider**, "Prefer RTL ←→ Prefer LTR", with the raw
-value shown small underneath. The audience is broader than developers; a bare
-`1.2` ratio means nothing to most of them.
+**Threshold control: labeled slider**, "Prefer RTL ←→ Prefer LTR". The audience
+is broader than developers; a bare `1.2` means nothing to most of them, so the
+slider is labeled as a **ratio that updates as it moves** — "Switches to
+left-to-right at a Latin : Hebrew/Arabic letter ratio of **1.2 : 1**". Say
+"Latin", not "English": the LTR regex covers Latin-1 supplement, so French,
+Spanish and German count too.
+
+**The scale is geometric, and the slider steps in display space.** A ratio's
+natural centre is `1.0` and its mirror of `0.5` is `2.0`, not `1.5` — so a
+linear `0.5–2.0` slider would put balance at a third of the track, give the RTL
+half a third of the tuning resolution, and make a notch worth 20% at one end and
+5% at the other.
+
+**Instead the 0.1 increments are applied to the displayed ratio, and the
+threshold is derived from that** — not the other way round. Slider position `p`
+runs `-10 .. +10` in whole steps; the displayed ratio component is
+`r = 1 + |p| / 10` (so `r` walks 1.0, 1.1, 1.2 … 2.0 by exactly 0.1); the stored
+threshold is `r` on the LTR side and its reciprocal `1 / r` on the RTL side.
+That is what makes the two halves mirror images: `p = -4` stores `1 / 1.4`,
+`p = +4` stores `1.4`, and the two multiply to 1.
+
+All 21 stops:
+
+| p | Label | Stored `t` | | p | Label | Stored `t` |
+|---:|---|---|---|---:|---|---|
+| -10 | 1 : 2 | 0.500 | | +1 | 1.1 : 1 | 1.100 |
+| -9 | 1 : 1.9 | 0.526 | | +2 | **1.2 : 1** | **1.200** ← default |
+| -8 | 1 : 1.8 | 0.556 | | +3 | 1.3 : 1 | 1.300 |
+| -7 | 1 : 1.7 | 0.588 | | +4 | 1.4 : 1 | 1.400 |
+| -6 | 1 : 1.6 | 0.625 | | +5 | 1.5 : 1 | 1.500 |
+| -5 | 1 : 1.5 | 0.667 | | +6 | 1.6 : 1 | 1.600 |
+| -4 | 1 : 1.4 | 0.714 | | +7 | 1.7 : 1 | 1.700 |
+| -3 | 1 : 1.3 | 0.769 | | +8 | 1.8 : 1 | 1.800 |
+| -2 | 1 : 1.2 | 0.833 | | +9 | 1.9 : 1 | 1.900 |
+| -1 | 1 : 1.1 | 0.909 | | +10 | 2 : 1 | 2.000 |
+| 0 | 1 : 1 | 1.000 | | | | |
+
+The table is generated, not hand-maintained — these two helpers live in
+`options.js` and are the authoritative definition:
+
+```js
+// Slider position -> stored threshold. p >= 0: 1 + p/10. p < 0: its reciprocal.
+const bcPosToRatio = p =>
+  p >= 0 ? 1 + p / 10 : Math.round(1000 / (1 - p / 10)) / 1000;
+
+// Stored threshold -> nearest slider position (may be off-stop; see below).
+const bcRatioToPos = t => Math.round((t >= 1 ? t - 1 : 1 - 1 / t) * 10);
+```
+
+The `1000`/`3`-decimal rounding is not cosmetic: `1 / 1.2 = 0.8333…` and one
+decimal would collapse it to `0.8`, a different stop. `BC_LTR_RATIO_DECIMALS`
+in [settings.js](../../settings.js) is 3 for the same reason, and all 21 stops
+round-trip `p → t → validated → p` unchanged.
+
+21 stops, 0.1 granularity in the units the user sees, symmetric, every notch
+worth the same, and today's default lands exactly on `p = +2`.
+
+**Storage holds `t`, never `p`.** `p` is a presentation coordinate local to
+`options.js` (`bcRatioToPos` / `bcPosToRatio`). Storing the ratio keeps
+`rtl.js` free of any translation layer, keeps the saved value self-describing,
+and means a future build can change the stop table or the default without
+silently reinterpreting everyone's existing preference. A stored value that
+falls between stops keeps working: the thumb snaps to the nearest stop, but the
+**label reads from the stored `t`** — a hand-edited `2.5` shows "2.5 : 1"
+rather than quietly claiming the user is on `2.0` — and only re-syncs once the
+slider is actually moved.
 
 ### Settings table
 
 | Storage key | Type | Default | Range / values | Consumer |
 |---|---|---|---|---|
-| `ltrRatioThreshold` | number | `1.2` | 0.5–3.0, step 0.1 | `rtl.js` |
+| `ltrRatioThreshold` | number | `1.2` | slider 0.5–2.0 (21 stops); accepted 1/3–3.0 | `rtl.js` |
 | `defaultInputDirection` | string | `'ltr'` | `'ltr'` \| `'rtl'` | `rtl.js` |
 | `debugLogging` | boolean | `false` | — | both |
 | `usageBarsEnabled` | boolean | `true` | — | `usage.js` |
@@ -68,10 +131,21 @@ UI, no behavior change.
   holding a reference always see current values.
 - Validation helper that clamps/coerces each key against the table.
 
-**Done when:** on claude.ai, `bcSettingsReady.then(() => console.log(bcSettings))`
-logs the defaults; hand-writing a value via `browser.storage.sync.set` in the
-extension console and reloading shows the new value; corrupt values fall back to
-defaults without throwing.
+**Testing this is not obvious.** Content-script globals live in an isolated
+sandbox — the page console (F12) cannot see `bcSettings`, and `about:debugging`
+→ Inspect opens the *extension's* context, which for this extension has no JS
+at all (no background script), so `browser` is undefined there too. Until the
+options page exists there is no privileged context. Hence
+`BC_SETTINGS_DEV_EXPORTS` in `settings.js`: set it to `true`, let `web-ext`
+reload, and the page console gains `bcDumpSettings()`, `bcSetSettings(json)`
+and `bcClearSettings()`. Set it back to `false` before committing — and delete
+the block once Step 1 makes it redundant.
+
+**Done when:** with dev exports on, `bcDumpSettings()` logs the defaults;
+`bcSetSettings('{"ltrRatioThreshold":2.4,"debugLogging":true}')` + reload shows
+the new values; `bcSetSettings('{"ltrRatioThreshold":"banana"}')` + reload falls
+back to `1.2` without throwing; with dev exports and `debugLogging` off, the
+console is silent.
 
 ---
 
@@ -89,6 +163,10 @@ read them yet.
   in a tab for four settings.
 - Controls: slider (threshold), radio pair (default input direction), two
   checkboxes (debug logging, usage bars).
+- The threshold slider is `min="-10" max="10" step="1"` over the position `p`,
+  with `bcRatioToPos` / `bcPosToRatio` converting to and from the stored ratio —
+  see the geometric-scale decision above. The stop table lives here, not in
+  `settings.js`: it is presentation.
 - Load current values on open; write on change (no Save button — instant-apply
   is the WebExtension norm). Show a brief "Saved" acknowledgement.
 - Add a "Restore defaults" button.
@@ -209,5 +287,8 @@ and takes effect, and both guard failures degrade silently.
 - **New files:** `settings.js` (content script, first), `options.html`, `options.js`
 - **Manifest additions:** `permissions: ["storage"]`, `options_ui`
 - **Shared global scope** across content scripts — prefix new globals `bc`/`BC_`
+- **Threshold:** storage holds the ratio `t`; the slider's `p` (`-10..+10`, 0.1
+  per step in the *displayed* ratio) exists only in `options.js` — see
+  [Threshold control](#design-decisions) for the stop table and helpers
 - **Guiding rule (inherited from issue #5):** never break the page — fail to
   defaults, not to a broken chat.
