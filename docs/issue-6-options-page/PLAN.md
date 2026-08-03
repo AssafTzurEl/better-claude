@@ -198,10 +198,15 @@ resets all four.
   attaching. Mark manual overrides on the element (e.g.
   `dataset.betterClaudeUserDir`) in `handleInputKeydown` and never re-apply the
   default over a user's explicit choice for that input.
-  - Open sub-question for whoever builds this: after a message is sent the
-    composer clears — decide whether the default re-asserts itself then, or the
-    user's last manual direction sticks for the session. Sticking is friendlier;
-    confirm against real usage.
+  - ~~Open sub-question: after a message is sent the composer clears — decide
+    whether the default re-asserts itself then, or the user's last manual
+    direction sticks for the session.~~ **Resolved: it sticks.** A Ctrl+Shift
+    press records the direction on the element (`betterClaudeUserDir`, so that
+    element is never touched again) *and* in a tab-scoped `bcInputDirOverride`,
+    which is what every composer mounted afterwards starts in. The setting is
+    the starting point, not a correction that keeps coming back. Deliberately
+    not tied to whether Claude recycles or replaces the composer node — that is
+    their implementation detail, and the behavior should not follow it.
 
 **Done when:** moving the slider and reloading visibly changes which mixed
 paragraphs render RTL; debug logging off produces zero `[Better Claude]` console
