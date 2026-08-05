@@ -4,8 +4,22 @@
 // chat title (narrow). Falls back to a fixed strip if the header is not found.
 
 // === Configuration ===
-const USAGE_ENABLED = true;
-const USAGE_DEBUG = true;
+// Whether the bars are shown is `bcSettings.usageBarsEnabled`, and console
+// logging is `bcSettings.debugLogging` - both read at call time so a change
+// takes effect without a reload.
+//
+// The debug exports below are a third thing, and deliberately not user-facing:
+// they publish fetchUsage/remountUsageWidget onto the *page's* window, and a
+// checkbox in the options page must not add API surface to claude.ai. Flip this
+// by hand while developing; it stays false in shipped code.
+const USAGE_DEV_EXPORTS = false;
+
+// Whether the feature is currently running. False until settings have loaded,
+// so the observers registered at top level stay no-ops until then, and false
+// again after teardownUsage() - a flag alone would not be enough, since those
+// observers would otherwise cheerfully re-mount a widget the user just turned
+// off.
+let usageActive = false;
 
 // Minimum pixel width for the widget to be useful in the header.
 // Two progress bars need label + percent + track — less than this is too cramped.
@@ -19,10 +33,8 @@ const POLL_INTERVAL_MS = 10000;
 
 // === Logging ===
 function usageLog(...args) {
-  if (USAGE_DEBUG) console.log('[Better Claude / usage]', ...args);
+  if (bcSettings.debugLogging) console.log('[Better Claude / usage]', ...args);
 }
-
-usageLog('module loaded');
 
 // === Org ID resolution ===
 
@@ -71,7 +83,7 @@ async function resolveOrgId() {
  *   { percent: number, severity: string, resetsAt: Date, isActive: boolean }
  */
 async function fetchUsage() {
-  if (!USAGE_ENABLED) return null;
+  if (!bcSettings.usageBarsEnabled) return null;
 
   const orgId = await resolveOrgId();
   if (!orgId) return null;
@@ -189,9 +201,13 @@ setInterval(updateLastUpdatedLabel, 15000);
 // Fetch and re-render. Callers are responsible for gating — use scheduleRefresh
 // unless bypassing the interval intentionally.
 async function doRefresh() {
+  if (!usageActive) return;
   usageLog('refreshing');
   lastRefreshAt = Date.now();
   const data = await fetchUsage();
+  // The request is slow enough that the user can uncheck the box while it is
+  // in flight; without this the response would mount a widget after teardown.
+  if (!usageActive) return;
   if (data) lastUpdatedAt = Date.now();
   mountUsageWidget(data);
 }
@@ -199,6 +215,7 @@ async function doRefresh() {
 // Collapse multiple triggers into one request; extend the delay to honour the
 // min interval if a recent fetch just happened.
 function scheduleRefresh(delayMs = 0) {
+  if (!usageActive) return;
   const remaining = MIN_REFRESH_INTERVAL_MS - (Date.now() - lastRefreshAt);
   const effectiveDelay = Math.max(delayMs, remaining > 0 ? remaining : 0);
   clearTimeout(refreshTimer);
@@ -207,6 +224,7 @@ function scheduleRefresh(delayMs = 0) {
 
 // Bypass the min interval (manual ↻ or initial load).
 async function forceRefresh() {
+  if (!usageActive) return;
   clearTimeout(refreshTimer);
   lastRefreshAt = 0;
   await doRefresh();
@@ -243,6 +261,7 @@ function stopButtonPresent() {
 }
 
 new MutationObserver(() => {
+  if (!usageActive) return;
   const nowGenerating = stopButtonPresent();
   if (nowGenerating === isGenerating) return;
   isGenerating = nowGenerating;
@@ -310,15 +329,24 @@ function handleClick(e) {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState !== 'visible') return;
+  usageLog('tab visible — scheduling refresh');
+  scheduleRefresh(0);
+}
+
+// Named handlers, so teardown can take them off again — and so re-enabling
+// mid-session cannot end up with two of each.
 function setupEventDetectors() {
   document.addEventListener('keydown', handleKeydown, true);
   document.addEventListener('click', handleClick, true);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      usageLog('tab visible — scheduling refresh');
-      scheduleRefresh(0);
-    }
-  });
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+}
+
+function removeEventDetectors() {
+  document.removeEventListener('keydown', handleKeydown, true);
+  document.removeEventListener('click', handleClick, true);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 }
 
 // === Styles ===
@@ -723,6 +751,7 @@ function checkPlacement() {
 // just two getBoundingClientRect calls and a comparison.
 let placementCheckTimer = null;
 new ResizeObserver(() => {
+  if (!usageActive) return;
   clearTimeout(placementCheckTimer);
   placementCheckTimer = setTimeout(checkPlacement, 150);
 }).observe(document.documentElement);
@@ -734,6 +763,7 @@ new ResizeObserver(() => {
 let spaRemountTimer = null;
 
 new MutationObserver(() => {
+  if (!usageActive) return;
   if (document.getElementById('bc-usage-widget')) return; // still present
   if (!lastUsageData) return;
 
@@ -745,20 +775,58 @@ new MutationObserver(() => {
   }, 300);
 }).observe(document.body, { childList: true, subtree: true });
 
-// === Init ===
+// === Init / teardown ===
+// Both are idempotent and safe to call at any point in the tab's life, so the
+// feature can be switched on and off mid-session without a reload.
 
 async function initUsage() {
-  if (!USAGE_ENABLED) return;
+  if (!bcSettings.usageBarsEnabled || usageActive) return;
+  usageActive = true;
   usageLog('init');
   setupEventDetectors();
   await forceRefresh();
 }
 
-initUsage();
+// A flag is not enough on its own: the widget is in someone else's DOM, and
+// three top-level observers plus two timers would keep bringing it back. This
+// unwinds all of it. The injected <style> stays - it only ever matches our own
+// widget, and leaving it makes re-enabling a little cheaper.
+function teardownUsage() {
+  if (!usageActive) return;
+  usageLog('teardown');
+  usageActive = false;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+  clearTimeout(spaRemountTimer);
+  spaRemountTimer = null;
+  clearTimeout(placementCheckTimer);
+  placementCheckTimer = null;
+  stopPoll();
+  // Reset, or the generation observer would compare against a stale `true` on
+  // re-enable and never start the poll.
+  isGenerating = false;
+
+  removeEventDetectors();
+  document.getElementById('bc-usage-widget')?.remove();
+
+  lastUsageData = null;
+  lastUpdatedAt = null;
+  headerTooNarrow = false;
+}
+
+// Held until settings are in: starting on the built-in default would flash the
+// bars up for a moment in a profile that has them switched off.
+// bcSettingsReady never rejects - on a storage failure it resolves with the
+// defaults, so this always runs.
+bcSettingsReady.then(() => {
+  usageLog('settings ready, usage bars', bcSettings.usageBarsEnabled ? 'on' : 'off');
+  initUsage();
+});
 
 // === Debug exports (Firefox only) ===
 
-if (USAGE_DEBUG) {
+if (USAGE_DEV_EXPORTS) {
   exportFunction(function() {
     fetchUsage().then(
       r => console.log('[Better Claude / usage] fetchUsage() =>', r),
@@ -772,4 +840,18 @@ if (USAGE_DEBUG) {
       e  => console.error('[Better Claude / usage] refresh failed:', e)
     );
   }, window, { defineAs: 'remountUsageWidget' });
+
+  // Until Step 4 subscribes to storage.onChanged, these are the only way to
+  // exercise the mid-session start/stop path from the page console.
+  exportFunction(function() {
+    teardownUsage();
+    console.log('[Better Claude / usage] torn down');
+  }, window, { defineAs: 'teardownUsage' });
+
+  exportFunction(function() {
+    initUsage().then(
+      () => console.log('[Better Claude / usage] init done, active:', usageActive),
+      e  => console.error('[Better Claude / usage] init failed:', e)
+    );
+  }, window, { defineAs: 'initUsage' });
 }

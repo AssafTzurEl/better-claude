@@ -242,6 +242,13 @@ they stay gone across chat switches and window resizes; re-checking brings them
 back without a reload; with debug logging off, claude.ai's console is clean and
 `window.fetchUsage` is `undefined`.
 
+> **What actually fires `teardownUsage()` is Step 4.** Nothing in the tab is
+> listening to storage yet, so at the end of Step 3 the toggle is verified by
+> reloading claude.ai after changing it, and the mid-session start/stop path by
+> calling `teardownUsage()` / `initUsage()` from the page console with
+> `USAGE_DEV_EXPORTS` flipped on. Step 4 subscribes to `storage.onChanged` and
+> the reload stops being needed; the two functions are already shaped for it.
+
 ---
 
 ## Step 4 — Live updates
