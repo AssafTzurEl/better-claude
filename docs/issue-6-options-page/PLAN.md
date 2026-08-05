@@ -242,12 +242,12 @@ they stay gone across chat switches and window resizes; re-checking brings them
 back without a reload; with debug logging off, claude.ai's console is clean and
 `window.fetchUsage` is `undefined`.
 
-> **What actually fires `teardownUsage()` is Step 4.** Nothing in the tab is
+> ~~**What actually fires `teardownUsage()` is Step 4.** Nothing in the tab is
 > listening to storage yet, so at the end of Step 3 the toggle is verified by
 > reloading claude.ai after changing it, and the mid-session start/stop path by
 > calling `teardownUsage()` / `initUsage()` from the page console with
-> `USAGE_DEV_EXPORTS` flipped on. Step 4 subscribes to `storage.onChanged` and
-> the reload stops being needed; the two functions are already shaped for it.
+> `USAGE_DEV_EXPORTS` flipped on.~~ **Done in Step 4:** the checkbox now drives
+> `initUsage()` / `teardownUsage()` directly and the reload is no longer needed.
 
 ---
 
@@ -265,6 +265,34 @@ back without a reload; with debug logging off, claude.ai's console is clean and
   - `usageBarsEnabled` → `initUsage()` / `teardownUsage()`.
   - `debugLogging` → nothing; both log helpers read at call time.
   - `defaultInputDirection` → applies at next input mount, per Step 2.
+
+**Notify on a diff, not on the event.** `bcApplyAndDiff()` validates the
+incoming values, applies them, and returns the Set of keys whose value actually
+changed; listeners are called with that Set and skipped entirely when it is
+empty. Three things fall out of it. The options page writes its own change to
+`bcSettings` *before* the storage round trip (Step 1), so its own echo diffs to
+nothing — no feedback loop, and no consumer redoing work it already did. A
+clamped or coerced value that lands on the value already held (`"banana"` →
+`1.2` when the threshold is already `1.2`) is likewise a non-event. And a
+consumer can cheaply ignore keys that are not its business.
+
+**The event is an overlay, not a snapshot.** `changes` carries only the keys
+that were written, so the handler starts from what it holds and overlays those.
+A key that was *removed* arrives with no `newValue`, and `undefined` is exactly
+what makes `bcValidateSettings` fall back to the default — the right answer,
+rather than keeping the stale value we happen to still be holding.
+
+**Handling is held behind `bcSettingsReady`.** An event arriving while the
+opening `get()` is still in flight would otherwise be overwritten by that older
+snapshot the moment it resolves.
+
+**A throwing listener is contained** — `try/catch` per listener, so one broken
+consumer costs neither the others their update nor the page its stability.
+
+**The options page is a consumer too.** It loads `settings.js`, so it gets the
+same subscription; it re-renders its controls on a genuine external change (a
+value synced in from another device, or a second copy of the page) instead of
+sitting there showing something that is no longer true.
 
 **Done when:** with claude.ai open in two tabs, changing a setting updates both
 within a second, with no reload and no console errors.

@@ -232,3 +232,21 @@ bcSettingsReady.then(() => {
   attachInputHandler();
   log('Better Claude: ready');
 });
+
+// === Live settings updates ===
+// Only the threshold needs anything done: it changes what the detector decides,
+// so the chat has to be re-scanned. Re-running the pass is safe - it recomputes
+// every block and overwrites the inline styles in both directions, so it
+// self-corrects rather than accumulating.
+//
+// debugLogging: nothing to do, log() reads it at call time.
+// defaultInputDirection: deliberately nothing. It is the direction a composer
+// *starts* in, and flipping the box out from under someone mid-sentence would
+// be a worse answer than waiting for the next mount.
+bcOnSettingsChanged(changed => {
+  if (!bcRtlReady) return;
+  if (changed.has('ltrRatioThreshold')) {
+    log('Threshold changed to', bcSettings.ltrRatioThreshold, '- re-scanning');
+    applyDirectionToChat();
+  }
+});

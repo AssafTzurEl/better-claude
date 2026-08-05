@@ -75,9 +75,44 @@ function bcValidateSettings(raw) {
 // see current values.
 const bcSettings = { ...BC_SETTINGS_DEFAULTS };
 
+// Validates `raw`, applies it, and reports which keys actually changed value.
+// The diff is what makes the change plumbing quiet: a write that lands on the
+// values we already hold notifies nobody.
+function bcApplyAndDiff(raw) {
+  const next = bcValidateSettings(raw);
+  const changed = new Set();
+  for (const key of Object.keys(BC_SETTINGS_DEFAULTS)) {
+    if (bcSettings[key] !== next[key]) changed.add(key);
+  }
+  Object.assign(bcSettings, next);
+  return changed;
+}
+
 function bcApplySettings(raw) {
-  Object.assign(bcSettings, bcValidateSettings(raw));
+  bcApplyAndDiff(raw);
   return bcSettings;
+}
+
+// === Change notification ===
+// Each consumer registers its own reaction, so settings.js never has to reach
+// into rtl.js or usage.js internals. Listeners receive the Set of keys that
+// changed plus the (mutated in place) settings object.
+const bcSettingsListeners = [];
+
+function bcOnSettingsChanged(fn) {
+  if (typeof fn === 'function') bcSettingsListeners.push(fn);
+}
+
+function bcNotifySettingsChanged(changed) {
+  for (const fn of bcSettingsListeners) {
+    // One consumer throwing must not cost the others their update - and must
+    // never reach the page.
+    try {
+      fn(changed, bcSettings);
+    } catch (e) {
+      console.warn('[Better Claude / settings] change listener threw:', e);
+    }
+  }
 }
 
 // === Storage read ===
@@ -93,3 +128,45 @@ const bcSettingsReady = (async () => {
   }
   return bcSettings;
 })();
+
+// === Live updates ===
+// A save in the options page - or a value synced in from another device -
+// arrives here, in every context that loaded this file: each open claude.ai
+// tab, and the options page itself.
+
+function bcHandleStorageChanged(changes, area) {
+  if (area !== 'sync') return;
+
+  // Start from what we hold and overlay only the keys the event mentions.
+  // A key that was *removed* has no `newValue`, and undefined is exactly what
+  // makes bcValidateSettings fall back to the default - which is the right
+  // answer, rather than keeping the value we happen to still be holding.
+  const raw = { ...bcSettings };
+  let touched = false;
+  for (const key of Object.keys(BC_SETTINGS_DEFAULTS)) {
+    if (!Object.prototype.hasOwnProperty.call(changes, key)) continue;
+    raw[key] = changes[key].newValue;
+    touched = true;
+  }
+  if (!touched) return;
+
+  const changed = bcApplyAndDiff(raw);
+  // The writer applied its own change locally before the storage round trip,
+  // so its own echo diffs to nothing and stops here. No feedback loop, and no
+  // consumer is asked to redo work it already did.
+  if (changed.size === 0) return;
+
+  bcSettingsLog('changed:', [...changed].join(', '), bcSettings);
+  bcNotifySettingsChanged(changed);
+}
+
+try {
+  browser.storage.onChanged.addListener((changes, area) => {
+    // Held behind the initial read: an event that arrives while the opening
+    // get() is still in flight would otherwise be overwritten by that older
+    // snapshot the moment it resolves.
+    bcSettingsReady.then(() => bcHandleStorageChanged(changes, area));
+  });
+} catch (e) {
+  console.warn('[Better Claude / settings] storage.onChanged unavailable:', e);
+}

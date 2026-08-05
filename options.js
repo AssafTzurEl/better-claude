@@ -216,4 +216,10 @@ function bcAttachHandlers() {
   bcRenderStrings();
   bcRenderSettings(await bcSettingsReady);
   bcAttachHandlers();
+
+  // The page is a consumer of live updates like any other: a value synced in
+  // from another device, or a second copy of this page, should not leave these
+  // controls showing something that is no longer true. Our own saves never get
+  // here - bcSave applies them locally first, so their echo diffs to nothing.
+  bcOnSettingsChanged(() => bcRenderSettings(bcSettings));
 })();

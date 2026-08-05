@@ -824,6 +824,24 @@ bcSettingsReady.then(() => {
   initUsage();
 });
 
+// === Live settings updates ===
+// The toggle is the whole reason initUsage()/teardownUsage() were written to be
+// callable at any point in the tab's life. debugLogging needs nothing here -
+// usageLog() reads it at call time.
+bcOnSettingsChanged(changed => {
+  if (!changed.has('usageBarsEnabled')) return;
+
+  if (bcSettings.usageBarsEnabled) {
+    usageLog('usage bars switched on');
+    // The listener is synchronous; initUsage() is not. Catch here or a failed
+    // first fetch surfaces as an unhandled rejection in the page console.
+    initUsage().catch(e => usageLog('init after settings change failed:', e));
+  } else {
+    usageLog('usage bars switched off');
+    teardownUsage();
+  }
+});
+
 // === Debug exports (Firefox only) ===
 
 if (USAGE_DEV_EXPORTS) {
@@ -841,8 +859,8 @@ if (USAGE_DEV_EXPORTS) {
     );
   }, window, { defineAs: 'remountUsageWidget' });
 
-  // Until Step 4 subscribes to storage.onChanged, these are the only way to
-  // exercise the mid-session start/stop path from the page console.
+  // The checkbox drives this path in normal use; these stay for exercising it
+  // from the page console without a round trip through the options page.
   exportFunction(function() {
     teardownUsage();
     console.log('[Better Claude / usage] torn down');
