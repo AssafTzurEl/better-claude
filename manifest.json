@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Better Claude",
-  "version": "1.1.0",
-  "description": "Improvements for Claude.ai: RTL alignment for Hebrew/Arabic chats, and live session + weekly usage bars in the chat header.",
+  "version": "1.2.0",
+  "description": "Improvements for Claude.ai: RTL alignment for Hebrew/Arabic chats, and live session + weekly usage bars in the chat header. Both configurable in the add-on's settings.",
   "author": "Assaf Tzur-El",
   "homepage_url": "https://github.com/AssafTzurEl/better-claude",
 
@@ -15,6 +15,13 @@
     "128": "icons/better-claude_logo_128x128.png"
   },
 
+
+  "permissions": ["storage"],
+
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
 
   "browser_specific_settings": {
     "gecko": {
@@ -30,7 +37,7 @@
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["content.js", "usage.js"],
+      "js": ["settings.js", "rtl.js", "usage.js"],
       "run_at": "document_idle"
     }
   ]

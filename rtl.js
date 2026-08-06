@@ -1,17 +1,14 @@
-// Better Claude - Firefox extension
-// Improvements for Claude.ai:
-//   - Automatic RTL alignment for Hebrew/Arabic content in chats
-//   - Ctrl+Right Shift / Ctrl+Left Shift to set input direction (container-level)
+// Better Claude - RTL module
+// Automatic RTL alignment for Hebrew/Arabic content in chats, plus
+// Ctrl+Right Shift / Ctrl+Left Shift to set input direction (container-level).
 // https://github.com/AssafTzurEl/better-claude
 
 // === Configuration ===
-const LTR_RATIO_THRESHOLD = 1.2; // LTR wins only if ltrCount > rtlCount * this
 const DEBOUNCE_MS = 100;
-const DEBUG = false; // Set to true for development logging
 
 // === Logging ===
 function log(...args) {
-  if (DEBUG) console.log('[Better Claude]', ...args);
+  if (bcSettings.debugLogging) console.log('[Better Claude]', ...args);
 }
 
 // === Detection ===
@@ -38,7 +35,7 @@ function detectDirectionFromText(text) {
 
   if (rtlCount === 0 && ltrCount === 0) return 'ltr';
   if (rtlCount === 0) return 'ltr';
-  return ltrCount > rtlCount * LTR_RATIO_THRESHOLD ? 'ltr' : 'rtl';
+  return ltrCount > rtlCount * bcSettings.ltrRatioThreshold ? 'ltr' : 'rtl';
 }
 
 function detectDirection(element) {
@@ -144,17 +141,40 @@ function injectInputStyles() {
   log('Input styles injected');
 }
 
+// Ctrl+Shift is an explicit choice, so it outranks the configured default - and
+// keeps outranking it. The direction last picked by hand is remembered for the
+// tab and carried to every composer mounted afterwards (a new chat, a
+// re-rendered input), until the tab is reloaded. Re-asserting the default after
+// each sent message would fight a user deliberately writing in the other
+// script; the setting is the starting point, not a correction that keeps
+// coming back.
+let bcInputDirOverride = null;
+
 function handleInputKeydown(e) {
   if (e.key !== 'Shift' || !e.ctrlKey) return;
 
   const input = e.currentTarget;
-  if (e.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT) {
-    setDirection(input, 'rtl');
-    log('Input set to RTL');
-  } else if (e.location === KeyboardEvent.DOM_KEY_LOCATION_LEFT) {
-    setDirection(input, 'ltr');
-    log('Input set to LTR');
-  }
+  let dir = null;
+  if (e.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT) dir = 'rtl';
+  else if (e.location === KeyboardEvent.DOM_KEY_LOCATION_LEFT) dir = 'ltr';
+  if (!dir) return;
+
+  setDirection(input, dir);
+  input.dataset.betterClaudeUserDir = dir; // never overwrite this element again
+  bcInputDirOverride = dir;
+  log('Input set to', dir.toUpperCase(), '(manual)');
+}
+
+// Gives a freshly mounted composer its starting direction. An element the user
+// has already set by hand is left untouched.
+function applyInputDirection(input) {
+  if (input.dataset.betterClaudeUserDir) return;
+
+  const carried = bcInputDirOverride !== null;
+  const dir = carried ? bcInputDirOverride : bcSettings.defaultInputDirection;
+  setDirection(input, dir);
+  if (carried) input.dataset.betterClaudeUserDir = dir;
+  log('Input direction set to', dir, carried ? '(carried over)' : '(default)');
 }
 
 function attachInputHandler() {
@@ -164,13 +184,22 @@ function attachInputHandler() {
 
   input.addEventListener('keydown', handleInputKeydown);
   input.dataset.betterClaudeAttached = 'true';
+  applyInputDirection(input);
   log('Input handler attached');
 }
 
 // === MutationObserver ===
 let debounceTimer = null;
 
+// Stays false until settings have loaded. The observer is registered at top
+// level so nothing is missed, but its work must not run before then: attaching
+// the input handler with the built-in defaults would mark the composer done,
+// and the user's configured direction would never reach it. Nothing is lost by
+// skipping - the initial pass below runs a full update as soon as it can.
+let bcRtlReady = false;
+
 function scheduleUpdate() {
+  if (!bcRtlReady) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
@@ -192,9 +221,32 @@ observer.observe(document.body, {
   characterData: true
 });
 
-// Initial pass
-injectInputStyles();
-applyDirectionToChat();
-attachInputHandler();
+// Initial pass, held until the settings are in - the first composer we touch
+// has to get the configured direction, not the built-in default.
+// bcSettingsReady never rejects: on a storage failure it resolves with the
+// defaults, so this always runs.
+bcSettingsReady.then(() => {
+  bcRtlReady = true;
+  injectInputStyles();
+  applyDirectionToChat();
+  attachInputHandler();
+  log('Better Claude: ready');
+});
 
-log('Better Claude: ready');
+// === Live settings updates ===
+// Only the threshold needs anything done: it changes what the detector decides,
+// so the chat has to be re-scanned. Re-running the pass is safe - it recomputes
+// every block and overwrites the inline styles in both directions, so it
+// self-corrects rather than accumulating.
+//
+// debugLogging: nothing to do, log() reads it at call time.
+// defaultInputDirection: deliberately nothing. It is the direction a composer
+// *starts* in, and flipping the box out from under someone mid-sentence would
+// be a worse answer than waiting for the next mount.
+bcOnSettingsChanged(changed => {
+  if (!bcRtlReady) return;
+  if (changed.has('ltrRatioThreshold')) {
+    log('Threshold changed to', bcSettings.ltrRatioThreshold, '- re-scanning');
+    applyDirectionToChat();
+  }
+});
