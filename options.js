@@ -121,7 +121,12 @@ function bcRenderStrings() {
     'bc-restore': s.restore,
   };
   for (const [id, value] of Object.entries(text)) bcEl(id).textContent = value;
+  // Language and its direction are set together, so a future browser.i18n layer
+  // has one place to change. `dir` is not merely the default restated: the page
+  // is embedded in about:addons, and stating it keeps the layout the strings'
+  // rather than the browser locale's.
   document.documentElement.lang = 'en';
+  document.documentElement.dir = 'ltr';
 }
 
 // === Rendering ===

@@ -821,7 +821,10 @@ function teardownUsage() {
 // defaults, so this always runs.
 bcSettingsReady.then(() => {
   usageLog('settings ready, usage bars', bcSettings.usageBarsEnabled ? 'on' : 'off');
-  initUsage();
+  // Caught for the same reason as the settings-change path below: initUsage() is
+  // async, and a first mount that throws must stay our problem, not an unhandled
+  // rejection in claude.ai's console.
+  initUsage().catch(e => usageLog('initial init failed:', e));
 });
 
 // === Live settings updates ===

@@ -319,6 +319,54 @@ within a second, with no reload and no console errors.
 **Done when:** manual test passes on a normal account, every setting round-trips
 and takes effect, and both guard failures degrade silently.
 
+### What the failure paths actually do
+
+Checked by running `settings.js` and `options.js` against a stubbed `browser`
+and DOM, rather than by reading them:
+
+- **No prior saved settings** → every key its default.
+- **Garbage in storage** (`"banana"`, `"up"`, `"yes"`, `0`, `2.9`) → each key
+  falls back or coerces on its own; unknown keys are ignored; nothing throws.
+  `schemaVersion: 2.9` floors to `2`, so a migration keyed on 3 is not skipped.
+- **Out of range** → `99` → `3.0`, `0.001` and `-5` → `0.333`.
+- **`storage.sync.get` throws** → warning, defaults, and `bcSettingsReady` still
+  resolves — which is what keeps `rtl.js` and `usage.js` starting at all.
+- **`storage.onChanged` unavailable** → warning, and the initial read is
+  unaffected.
+- **Change events** → overlay (untouched keys survive), diff (a write landing on
+  the held value notifies nobody), removal (no `newValue` → default), and area
+  (`local` ignored).
+- **A listener that throws** → contained; the next listener still runs.
+- **`storage.sync.set` throws** → the error message is shown, and the page keeps
+  the value locally rather than silently reverting under the user.
+- **A partial patch** → `bcSave` writes the merged whole, so changing one
+  control cannot reset the other four.
+- **All 21 slider stops** round-trip `p → t → validated → p`; mirrors multiply
+  to 1; an off-stop `2.53` reads back as `2.53 : 1` while the thumb snaps.
+
+**No collisions:** concatenating the three content scripts (and separately
+`settings.js` + `options.js`) parses clean, which is the same lexical-redeclaration
+check the shared global scope applies. No `bc*` name is declared twice, and the
+three top-level observers in `usage.js` all gate on `usageActive`.
+
+**Two fixes came out of it:**
+
+- `usage.js` — the initial `initUsage()` had no `.catch()`, unlike its sibling
+  on the settings-change path. A first mount that threw would have surfaced as
+  an unhandled rejection in claude.ai's console.
+- `options.js` — `dir` is now set beside `lang`. The page is embedded in
+  `about:addons`, and an English-only page should not inherit its layout
+  direction from the browser locale.
+
+**Release:** `manifest.json` → `1.2.0`, description now mentions the settings.
+`README.md` — settings page moved into the current-feature list in both
+languages, "two content scripts" → three plus a paragraph on what the settings
+script does, and the stale English "RTL support in the input textbox" planned
+item replaced with the per-paragraph one the Hebrew list already had. The
+privacy section now says what is stored: four settings in extension storage,
+synced by Firefox to the user's own devices if they have an account, and never
+to the author.
+
 ---
 
 ## Quick reference
